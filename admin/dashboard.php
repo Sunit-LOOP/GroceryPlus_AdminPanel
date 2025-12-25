@@ -14,14 +14,18 @@ try {
     $total_products = $pdo->query("SELECT COUNT(*) FROM products")->fetchColumn() ?? 0;
     $total_orders = $pdo->query("SELECT COUNT(*) FROM orders")->fetchColumn() ?? 0;
     $total_messages = $pdo->query("SELECT COUNT(*) FROM messages WHERE is_read = 0")->fetchColumn() ?? 0;
+    $today_new_users = $pdo->query("SELECT COUNT(*) FROM users WHERE DATE(created_at) = DATE('now')")->fetchColumn() ?? 0;
 
     // Today's metrics
     $today_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE DATE(created_at) = DATE('now')")->fetchColumn() ?? 0;
+    $yesterday_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE DATE(created_at) = DATE('now', '-1 day')")->fetchColumn() ?? 0;
     $today_revenue = $pdo->query("SELECT SUM(total_amount) FROM orders WHERE DATE(created_at) = DATE('now') AND status = 'delivered'")->fetchColumn() ?? 0;
 
     // Weekly metrics (last 7 days)
     $week_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE created_at >= datetime('now', '-7 days')")->fetchColumn() ?? 0;
     $week_revenue = $pdo->query("SELECT SUM(total_amount) FROM orders WHERE created_at >= datetime('now', '-7 days') AND status = 'delivered'")->fetchColumn() ?? 0;
+    $prev_week_revenue = $pdo->query("SELECT SUM(total_amount) FROM orders WHERE created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days') AND status = 'delivered'")->fetchColumn() ?? 0;
+
 
     // Status breakdown
     $pending_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'pending'")->fetchColumn() ?? 0;
@@ -66,7 +70,7 @@ try {
 } catch (Exception $e) {
     // Default values if database error
     $total_users = $total_products = $total_orders = $total_messages = 0;
-    $today_orders = $today_revenue = $week_orders = $week_revenue = 0;
+    $today_orders = $yesterday_orders = $today_revenue = $week_orders = $week_revenue = $prev_week_revenue = 0;
     $pending_orders = $processing_orders = $shipped_orders = $delivered_orders = 0;
     $top_products = $recent_orders = $low_stock_products = [];
 }
@@ -86,6 +90,17 @@ function getStatusColor($status) {
         default => 'secondary'
     };
 }
+
+function calculatePercentageChange($current, $previous) {
+    if ($previous == 0) {
+        return $current > 0 ? 100 : 0;
+    }
+    return (($current - $previous) / $previous) * 100;
+}
+
+$weekly_revenue_change = calculatePercentageChange($week_revenue, $prev_week_revenue);
+$today_orders_change = calculatePercentageChange($today_orders, $yesterday_orders);
+
 
 include 'includes/header.php';
 ?>
@@ -122,8 +137,9 @@ include 'includes/header.php';
             <div class="kpi-content">
                 <div class="kpi-value"><?php echo formatCurrency($week_revenue); ?></div>
                 <div class="kpi-label">Weekly Revenue</div>
-                <div class="kpi-change positive">
-                    <i class="fas fa-arrow-up"></i> +15.3%
+                <div class="kpi-change <?php echo $weekly_revenue_change >= 0 ? 'positive' : 'negative'; ?>">
+                    <i class="fas fa-arrow-<?php echo $weekly_revenue_change >= 0 ? 'up' : 'down'; ?>"></i>
+                    <?php echo sprintf('%+.1f%%', $weekly_revenue_change); ?>
                 </div>
             </div>
         </div>
@@ -141,8 +157,9 @@ include 'includes/header.php';
             <div class="kpi-content">
                 <div class="kpi-value"><?php echo $today_orders; ?></div>
                 <div class="kpi-label">Orders Today</div>
-                <div class="kpi-change positive">
-                    <i class="fas fa-arrow-up"></i> +8.2%
+                <div class="kpi-change <?php echo $today_orders_change >= 0 ? 'positive' : 'negative'; ?>">
+                    <i class="fas fa-arrow-<?php echo $today_orders_change >= 0 ? 'up' : 'down'; ?>"></i>
+                    <?php echo sprintf('%+.1f%%', $today_orders_change); ?>
                 </div>
             </div>
         </div>
@@ -161,7 +178,7 @@ include 'includes/header.php';
                 <div class="kpi-value"><?php echo $total_users; ?></div>
                 <div class="kpi-label">Active Customers</div>
                 <div class="kpi-change positive">
-                    <i class="fas fa-user-plus"></i> +24 new
+                    <i class="fas fa-user-plus"></i> +<?php echo $today_new_users; ?> new
                 </div>
             </div>
         </div>

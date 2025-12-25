@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS users (
     user_email TEXT,
     user_phone TEXT,
     user_password TEXT,
-    user_salt TEXT,
     user_type TEXT DEFAULT 'customer',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -128,9 +127,10 @@ INSERT OR IGNORE INTO categories (category_id, category_name, category_descripti
 INSERT OR IGNORE INTO vendors (vendor_id, vendor_name, vendor_description) VALUES
 (1, 'Local Farm', 'Organic produce');
 
-INSERT OR IGNORE INTO users (user_id, user_name, user_email, user_phone) VALUES
-(1, 'John Doe', 'john@example.com', '123-456-7890'),
-(2, 'Jane Smith', 'jane@example.com', '098-765-4321');
+INSERT OR IGNORE INTO users (user_id, user_name, user_email, user_phone, user_password, user_type) VALUES
+(1, 'John Doe', 'john@example.com', '123-456-7890', '$2y$10$/vJQrUe7mmnHEGwh7ifXee6ugt8c/0jhIJ9PLMBJOv5KoQBeQ5waa', 'customer'),
+(2, 'Jane Smith', 'jane@example.com', '098-765-4321', '$2y$10$/vJQrUe7mmnHEGwh7ifXee6ugt8c/0jhIJ9PLMBJOv5KoQBeQ5waa', 'customer'),
+(3, 'admin', 'admin@example.com', '111-222-3333', '$2y$10$/vJQrUe7mmnHEGwh7ifXee6ugt8c/0jhIJ9PLMBJOv5KoQBeQ5waa', 'admin');
 
 INSERT OR IGNORE INTO products (product_id, product_name, category_id, price, description, stock_quantity, vendor_id) VALUES
 (1, 'Apple', 1, 1.50, 'Fresh red apple', 100, 1),

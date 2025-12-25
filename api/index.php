@@ -1,62 +1,35 @@
 <?php
-// GroceryPlus API - Complete Sync System
-// Supports both Android App and Web Application
+/**
+ * GroceryPlus REST API
+ * Version: 1.0
+ * Supports Android App, iOS App, and Web Application
+ * 
+ * Base URL: http://localhost/groceryplus/api/
+ * Authentication: Bearer Token in Authorization header
+ * Content-Type: application/json
+ */
 
-header('Content-Type: application/json');
+// Headers
+header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('X-API-Version: 1.0');
 
 // Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
     exit(0);
 }
 
-include '../db_config.php';
+// Error reporting
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
-// Simple token validation (simplified for compatibility)
-function validateToken() {
-    $token = $_SERVER['HTTP_AUTHORIZATION'] ?? $_GET['token'] ?? null;
+include 'src/includes/db.php';
 
-    if (!$token) {
-        return false;
-    }
-
-    // Simple validation - in production use proper JWT
-    return strpos($token, 'user_') === 0 || strpos($token, 'admin_') === 0;
-}
-
-function generateToken($userId, $isAdmin = false) {
-    $prefix = $isAdmin ? 'admin_' : 'user_';
-    return $prefix . $userId . '_' . time() . '_' . substr(md5(uniqid()), 0, 8);
-}
-
-function getUserFromToken() {
-    $token = $_SERVER['HTTP_AUTHORIZATION'] ?? $_GET['token'] ?? null;
-
-    if (!$token) return null;
-
-    // Extract user ID from token
-    if (strpos($token, 'user_') === 0) {
-        $parts = explode('_', $token);
-        return ['id' => $parts[1], 'type' => 'user'];
-    } elseif (strpos($token, 'admin_') === 0) {
-        $parts = explode('_', $token);
-        return ['id' => $parts[1], 'type' => 'admin'];
-    }
-
-    return null;
-}
-
-function sendResponse($data, $statusCode = 200) {
-    http_response_code($statusCode);
-    echo json_encode($data);
-    exit;
-}
-
-function sendError($message, $statusCode = 400) {
-    sendResponse(['error' => true, 'message' => $message], $statusCode);
-}
+include 'src/includes/helpers.php';
 
 // Parse request
 $method = $_SERVER['REQUEST_METHOD'];
@@ -71,7 +44,8 @@ $id = $pathParts[1] ?? null;
 try {
     switch ($endpoint) {
         case 'auth':
-            handleAuth($method, $pdo);
+            include 'src/controllers/auth.php';
+            AuthController::handleAuth($method, $pdo);
             break;
         case 'register':
             handleRegister($method, $pdo);
@@ -117,311 +91,27 @@ try {
     sendError('Internal server error', 500);
 }
 
-function handleAuth($method, $pdo) {
-    if ($method !== 'POST') {
-        sendError('Method not allowed', 405);
-    }
 
-    $data = json_decode(file_get_contents('php://input'), true);
 
-    if (!isset($data['email'], $data['password'])) {
-        sendError('Email and password required');
-    }
-
-    // Check for admin login
-    if ($data['email'] === 'admin@groceryplus.com' && $data['password'] === 'admin123') {
-        sendResponse([
-            'token' => generateToken(1, true),
-            'user' => [
-                'id' => 1,
-                'name' => 'Administrator',
-                'email' => 'admin@groceryplus.com',
-                'type' => 'admin'
-            ]
-        ]);
-    }
-
-    // Check user login
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE user_email = ?");
-    $stmt->execute([$data['email']]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$user || !password_verify($data['password'], $user['user_password'] ?? '')) {
-        sendError('Invalid credentials', 401);
-    }
-
-    sendResponse([
-        'token' => generateToken($user['user_id']),
-        'user' => [
-            'id' => $user['user_id'],
-            'name' => $user['user_name'],
-            'email' => $user['user_email'],
-            'phone' => $user['user_phone'],
-            'type' => 'user'
-        ]
-    ]);
-}
-
-function handleRegister($method, $pdo) {
-    if ($method !== 'POST') {
-        sendError('Method not allowed', 405);
-    }
-
-    $data = json_decode(file_get_contents('php://input'), true);
-
-    if (!isset($data['name'], $data['email'], $data['password'], $data['phone'])) {
-        sendError('All fields required');
-    }
-
-    // Check if email exists
-    $stmt = $pdo->prepare("SELECT user_id FROM users WHERE user_email = ?");
-    $stmt->execute([$data['email']]);
-    if ($stmt->fetch()) {
-        sendError('Email already registered', 409);
-    }
-
-    // Hash password
-    $hashedPassword = password_hash($data['password'], PASSWORD_DEFAULT);
-
-    // Insert user
-    $stmt = $pdo->prepare("INSERT INTO users (user_name, user_email, user_phone, user_password, user_type) VALUES (?, ?, ?, ?, 'customer')");
-    $stmt->execute([$data['name'], $data['email'], $data['phone'], $hashedPassword]);
-
-    $userId = $pdo->lastInsertId();
-
-    sendResponse([
-        'token' => generateToken($userId),
-        'user' => [
-            'id' => $userId,
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'phone' => $data['phone'],
-            'type' => 'user'
-        ]
-    ], 201);
-}
-
-function handleProducts($method, $id, $pdo) {
-    switch ($method) {
-        case 'GET':
-            if ($id) {
-                $stmt = $pdo->prepare("
-                    SELECT p.*, c.category_name, v.vendor_name
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.category_id
-                    LEFT JOIN vendors v ON p.vendor_id = v.vendor_id
-                    WHERE p.product_id = ?
-                ");
-                $stmt->execute([$id]);
-                $product = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($product) {
-                    $product['image_url'] = $product['image'] ? "http://localhost/groceryplus/images/{$product['image']}" : null;
-                    sendResponse($product);
-                } else {
-                    sendError('Product not found', 404);
-                }
-            } else {
-                $category = $_GET['category'] ?? null;
-                $search = $_GET['search'] ?? null;
-                $limit = (int)($_GET['limit'] ?? 50);
-                $offset = (int)($_GET['offset'] ?? 0);
-
-                $query = "
-                    SELECT p.*, c.category_name, v.vendor_name
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.category_id
-                    LEFT JOIN vendors v ON p.vendor_id = v.vendor_id
-                    WHERE 1=1
-                ";
-                $params = [];
-
-                if ($category) {
-                    $query .= " AND c.category_name LIKE ?";
-                    $params[] = "%$category%";
-                }
-
-                if ($search) {
-                    $query .= " AND (p.product_name LIKE ? OR p.description LIKE ?)";
-                    $params[] = "%$search%";
-                    $params[] = "%$search%";
-                }
-
-                $query .= " ORDER BY p.product_id DESC LIMIT ? OFFSET ?";
-                $params[] = $limit;
-                $params[] = $offset;
-
-                $stmt = $pdo->prepare($query);
-                $stmt->execute($params);
-                $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-                // Add image URLs
-                foreach ($products as &$product) {
-                    $product['image_url'] = $product['image'] ? "http://localhost/groceryplus/images/{$product['image']}" : null;
-                }
-
-                sendResponse(['products' => $products, 'count' => count($products)]);
-            }
+        case 'register':
+            include 'src/controllers/register.php';
+            RegisterController::handleRegister($method, $pdo);
             break;
 
-        case 'POST':
-            if (!validateToken()) {
-                sendError('Unauthorized', 401);
-            }
-
-            $user = getUserFromToken();
-            if ($user['type'] !== 'admin') {
-                sendError('Admin access required', 403);
-            }
-
-            $data = json_decode(file_get_contents('php://input'), true);
-
-            if (!isset($data['product_name'], $data['price'])) {
-                sendError('Product name and price required');
-            }
-
-            $stmt = $pdo->prepare("
-                INSERT INTO products (product_name, category_id, price, description, stock_quantity, vendor_id, image)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([
-                $data['product_name'],
-                $data['category_id'] ?? 1,
-                $data['price'],
-                $data['description'] ?? '',
-                $data['stock_quantity'] ?? 0,
-                $data['vendor_id'] ?? 1,
-                $data['image'] ?? null
-            ]);
-
-            sendResponse(['product_id' => $pdo->lastInsertId()], 201);
+        case 'products':
+            include 'src/controllers/products.php';
+            ProductController::handleProducts($method, $id, $pdo);
             break;
 
-        case 'PUT':
-            if (!validateToken() || !$id) {
-                sendError('Unauthorized or invalid request', 401);
-            }
-
-            $user = getUserFromToken();
-            if ($user['type'] !== 'admin') {
-                sendError('Admin access required', 403);
-            }
-
-            $data = json_decode(file_get_contents('php://input'), true);
-            $updates = [];
-            $params = [];
-
-            foreach (['product_name', 'category_id', 'price', 'description', 'stock_quantity', 'vendor_id', 'image'] as $field) {
-                if (isset($data[$field])) {
-                    $updates[] = "$field = ?";
-                    $params[] = $data[$field];
-                }
-            }
-
-            if (empty($updates)) {
-                sendError('No fields to update');
-            }
-
-            $params[] = $id;
-            $stmt = $pdo->prepare("UPDATE products SET " . implode(', ', $updates) . " WHERE product_id = ?");
-            $stmt->execute($params);
-
-            sendResponse(['success' => true]);
+        case 'categories':
+            include 'src/controllers/categories.php';
+            CategoryController::handleCategories($method, $id, $pdo);
             break;
 
-        case 'DELETE':
-            if (!validateToken() || !$id) {
-                sendError('Unauthorized or invalid request', 401);
-            }
-
-            $user = getUserFromToken();
-            if ($user['type'] !== 'admin') {
-                sendError('Admin access required', 403);
-            }
-
-            $stmt = $pdo->prepare("DELETE FROM products WHERE product_id = ?");
-            $stmt->execute([$id]);
-
-            sendResponse(['success' => true]);
+        case 'users':
+            include 'src/controllers/users.php';
+            UserController::handleUsers($method, $id, $pdo);
             break;
-
-        default:
-            sendError('Method not allowed', 405);
-    }
-}
-
-function handleCategories($method, $id, $pdo) {
-    switch ($method) {
-        case 'GET':
-            if ($id) {
-                $stmt = $pdo->prepare("SELECT * FROM categories WHERE category_id = ?");
-                $stmt->execute([$id]);
-                sendResponse($stmt->fetch(PDO::FETCH_ASSOC));
-            } else {
-                $stmt = $pdo->query("SELECT * FROM categories ORDER BY category_name");
-                sendResponse($stmt->fetchAll(PDO::FETCH_ASSOC));
-            }
-            break;
-
-        case 'POST':
-            if (!validateToken()) sendError('Unauthorized', 401);
-
-            $data = json_decode(file_get_contents('php://input'), true);
-            $stmt = $pdo->prepare("INSERT INTO categories (category_name, category_description) VALUES (?, ?)");
-            $stmt->execute([$data['category_name'], $data['category_description'] ?? '']);
-            sendResponse(['category_id' => $pdo->lastInsertId()], 201);
-            break;
-
-        default:
-            sendError('Method not allowed', 405);
-    }
-}
-
-function handleUsers($method, $id, $pdo) {
-    if (!validateToken()) {
-        sendError('Unauthorized', 401);
-    }
-
-    $user = getUserFromToken();
-    if ($user['type'] !== 'admin' && $method !== 'GET') {
-        sendError('Admin access required', 403);
-    }
-
-    switch ($method) {
-        case 'GET':
-            if ($id) {
-                $stmt = $pdo->prepare("SELECT user_id, user_name, user_email, user_phone, user_type, created_at FROM users WHERE user_id = ?");
-                $stmt->execute([$id]);
-                sendResponse($stmt->fetch(PDO::FETCH_ASSOC));
-            } else {
-                $stmt = $pdo->query("SELECT user_id, user_name, user_email, user_phone, user_type, created_at FROM users ORDER BY created_at DESC");
-                sendResponse($stmt->fetchAll(PDO::FETCH_ASSOC));
-            }
-            break;
-
-        case 'PUT':
-            $data = json_decode(file_get_contents('php://input'), true);
-            $updates = [];
-            $params = [];
-
-            foreach (['user_name', 'user_email', 'user_phone'] as $field) {
-                if (isset($data[$field])) {
-                    $updates[] = "$field = ?";
-                    $params[] = $data[$field];
-                }
-            }
-
-            $params[] = $id;
-            $stmt = $pdo->prepare("UPDATE users SET " . implode(', ', $updates) . " WHERE user_id = ?");
-            $stmt->execute($params);
-
-            sendResponse(['success' => true]);
-            break;
-
-        default:
-            sendError('Method not allowed', 405);
-    }
-}
 
 function handleOrders($method, $id, $pdo) {
     if (!validateToken()) {
@@ -439,7 +129,7 @@ function handleOrders($method, $id, $pdo) {
                     LEFT JOIN users u ON o.user_id = u.user_id
                     WHERE o.order_id = ?
                 ");
-                $stmt->execute([$id]);
+                $stmt->execute([(int)$id]);
                 $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if ($order) {
@@ -450,12 +140,12 @@ function handleOrders($method, $id, $pdo) {
                         LEFT JOIN products p ON oi.product_id = p.product_id
                         WHERE oi.order_id = ?
                     ");
-                    $stmt->execute([$id]);
+                    $stmt->execute([(int)$id]);
                     $order['items'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                     // Add image URLs
                     foreach ($order['items'] as &$item) {
-                        $item['image_url'] = $item['image'] ? "http://localhost/groceryplus/images/{$item['image']}" : null;
+                        $item['image_url'] = $item['image'] ? API_BASE_URL . "/images/{$item['image']}" : null;
                     }
 
                     sendResponse($order);
@@ -475,7 +165,7 @@ function handleOrders($method, $id, $pdo) {
                 if ($user['type'] === 'user') {
                     $query .= " WHERE o.user_id = ? ";
                     $stmt = $pdo->prepare($query . " GROUP BY o.order_id ORDER BY o.created_at DESC");
-                    $stmt->execute([$user['id']]);
+                    $stmt->execute([(int)$user['id']]);
                 } else {
                     $query .= " GROUP BY o.order_id ORDER BY o.created_at DESC";
                     $stmt = $pdo->prepare($query);
@@ -487,56 +177,146 @@ function handleOrders($method, $id, $pdo) {
             break;
 
         case 'POST':
-            $data = json_decode(file_get_contents('php://input'), true);
+            $data = getJsonInput();
 
             if (!isset($data['user_id'], $data['items'])) {
-                sendError('User ID and items required');
+                sendError('User ID and items required', 400);
+            }
+            // Ensure user ID matches token if not admin
+            if ($user['type'] !== 'admin' && (int)$data['user_id'] !== (int)$user['id']) {
+                sendError('Cannot create order for another user', 403);
             }
 
             // Calculate total
             $total = 0;
             foreach ($data['items'] as $item) {
+                if (!isset($item['product_id'], $item['quantity'], $item['price']) || $item['quantity'] <= 0 || $item['price'] < 0) {
+                    sendError('Invalid item data in order', 400);
+                }
                 $total += $item['price'] * $item['quantity'];
             }
 
-            // Create order
-            $stmt = $pdo->prepare("
-                INSERT INTO orders (user_id, total_amount, delivery_fee, status, order_date)
-                VALUES (?, ?, ?, 'pending', datetime('now'))
-            ");
-            $stmt->execute([$data['user_id'], $total, $data['delivery_fee'] ?? 0]);
-            $orderId = $pdo->lastInsertId();
+            try {
+                $pdo->beginTransaction();
 
-            // Add items
-            foreach ($data['items'] as $item) {
+                // Create order
                 $stmt = $pdo->prepare("
-                    INSERT INTO order_items (order_id, product_id, quantity, price)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO orders (user_id, total_amount, delivery_fee, status, order_date)
+                    VALUES (?, ?, ?, 'pending', datetime('now'))
                 ");
-                $stmt->execute([$orderId, $item['product_id'], $item['quantity'], $item['price']]);
-            }
+                $stmt->execute([(int)$data['user_id'], $total, (float)($data['delivery_fee'] ?? 0)]);
+                $orderId = (int)$pdo->lastInsertId();
 
-            sendResponse(['order_id' => $orderId], 201);
+                // Add items
+                foreach ($data['items'] as $item) {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO order_items (order_id, product_id, quantity, price)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    $stmt->execute([$orderId, (int)$item['product_id'], (int)$item['quantity'], (float)$item['price']]);
+                }
+
+                $pdo->commit();
+                sendResponse(['order_id' => $orderId, 'message' => 'Order created successfully'], 201);
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                error_log("Order creation error: " . $e->getMessage());
+                sendError('Failed to create order', 500);
+            }
             break;
 
         case 'PUT':
-            if (!$id) sendError('Order ID required');
+            if (!$id) sendError('Order ID required', 400);
 
-            $data = json_decode(file_get_contents('php://input'), true);
+            $data = getJsonInput();
 
-            if ($user['type'] === 'admin') {
-                $stmt = $pdo->prepare("UPDATE orders SET status = ?, shipped_date = ? WHERE order_id = ?");
-                $shippedDate = $data['status'] === 'shipped' ? date('Y-m-d H:i:s') : null;
-                $stmt->execute([$data['status'], $shippedDate, $id]);
-            } else {
-                // Users can only cancel pending orders
-                if ($data['status'] === 'cancelled') {
-                    $stmt = $pdo->prepare("UPDATE orders SET status = 'cancelled' WHERE order_id = ? AND user_id = ? AND status = 'pending'");
-                    $stmt->execute([$id, $user['id']]);
+            // Fetch the order to check ownership
+            $stmt = $pdo->prepare("SELECT user_id FROM orders WHERE order_id = ?");
+            $stmt->execute([(int)$id]);
+            $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$order) {
+                sendError('Order not found', 404);
+            }
+
+            // If the user is not an admin, they can only cancel their own orders.
+            if ($user['type'] !== 'admin') {
+                if ((int)$order['user_id'] !== (int)$user['id']) {
+                    sendError('Cannot update orders for another user', 403);
+                }
+                if (!isset($data['status']) || $data['status'] !== 'cancelled') {
+                    sendError('You can only cancel your own order', 403);
                 }
             }
 
-            sendResponse(['success' => true]);
+
+            try {
+                $updates = [];
+                $params = [];
+                $shippedDate = null;
+                if (isset($data['status'])) {
+                    $allowedStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+                    if (!in_array($data['status'], $allowedStatuses)) {
+                        sendError('Invalid order status', 422);
+                    }
+                    $updates[] = "status = ?";
+                    $params[] = sanitizeString($data['status']);
+                    if ($data['status'] === 'shipped' || $data['status'] === 'delivered') {
+                        $updates[] = "shipped_date = ?";
+                        $params[] = date('Y-m-d H:i:s');
+                    }
+                }
+                // Add other updatable fields here if necessary (e.g., delivery_fee by admin)
+
+                if (empty($updates)) {
+                    sendError('No fields to update', 400);
+                }
+
+                $params[] = (int)$id;
+
+                $stmt = $pdo->prepare("UPDATE orders SET " . implode(', ', $updates) . " WHERE order_id = ?");
+                $stmt->execute($params);
+
+                if ($stmt->rowCount() > 0) {
+                    sendResponse(['success' => true, 'message' => 'Order updated successfully']);
+                } else {
+                    sendError('Order not found or no changes made', 404);
+                }
+            } catch (PDOException $e) {
+                error_log("Order update error: " . $e->getMessage());
+                sendError('Failed to update order', 500);
+            }
+            break;
+
+        case 'DELETE':
+            if (!$id) sendError('Order ID required', 400);
+            // Only admin can delete orders
+            if ($user['type'] !== 'admin') {
+                sendError('Admin access required', 403);
+            }
+
+            try {
+                $pdo->beginTransaction();
+
+                // Delete order items first
+                $stmt = $pdo->prepare("DELETE FROM order_items WHERE order_id = ?");
+                $stmt->execute([(int)$id]);
+
+                // Then delete the order
+                $stmt = $pdo->prepare("DELETE FROM orders WHERE order_id = ?");
+                $stmt->execute([(int)$id]);
+
+                $pdo->commit();
+                if ($stmt->rowCount() > 0) {
+                    sendResponse(['success' => true, 'message' => 'Order deleted successfully']);
+                } else {
+                    sendError('Order not found', 404);
+                }
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                error_log("Order deletion error: " . $e->getMessage());
+                sendError('Failed to delete order', 500);
+            }
             break;
 
         default:
@@ -913,37 +693,61 @@ function handleUpload($method) {
     }
 
     $user = getUserFromToken();
-    if ($user['type'] !== 'admin') {
+    if (!$user || $user['type'] !== 'admin') {
         sendError('Admin access required', 403);
     }
 
     if (!isset($_FILES['image'])) {
-        sendError('No image file provided');
+        sendError('No image file provided', 400);
     }
 
     $file = $_FILES['image'];
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
 
-    if (!in_array($file['type'], $allowedTypes)) {
-        sendError('Invalid file type. Only JPEG, PNG, and GIF allowed');
+    // Validate file type
+    if (!in_array($file['type'], ALLOWED_IMAGE_TYPES)) {
+        sendError('Invalid file type. Only JPEG, PNG, GIF, and WebP allowed', 422);
     }
 
-    if ($file['size'] > 5 * 1024 * 1024) { // 5MB limit
-        sendError('File too large. Maximum size is 5MB');
+    // Validate file size
+    if ($file['size'] > MAX_FILE_SIZE) {
+        sendError('File too large. Maximum size is 5MB', 422);
     }
 
-    $uploadDir = '../images/';
-    $fileName = uniqid() . '_' . basename($file['name']);
-    $uploadPath = $uploadDir . $fileName;
-
-    if (move_uploaded_file($file['tmp_name'], $uploadPath)) {
-        sendResponse([
-            'success' => true,
-            'image_url' => "http://localhost/groceryplus/images/$fileName",
-            'filename' => $fileName
-        ]);
-    } else {
-        sendError('Upload failed');
+    // Check for upload errors
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        error_log("File upload error: " . $file['error']);
+        sendError('Upload failed. Please try again.', 500);
     }
+
+    // Create upload directory if doesn't exist
+    if (!is_dir(UPLOAD_DIR)) {
+        mkdir(UPLOAD_DIR, 0755, true);
+    }
+
+    // Generate unique filename
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    $fileName = uniqid('img_', true) . '.' . $ext;
+    $uploadPath = UPLOAD_DIR . $fileName;
+
+    // Validate file can be read as image
+    if (!getimagesize($file['tmp_name'])) {
+        sendError('Invalid image file', 422);
+    }
+
+    // Move uploaded file
+    if (!move_uploaded_file($file['tmp_name'], $uploadPath)) {
+        error_log("Failed to move uploaded file: $uploadPath");
+        sendError('Upload failed. Please try again.', 500);
+    }
+
+    // Set proper permissions
+    chmod($uploadPath, 0644);
+
+    sendResponse([
+        'success' => true,
+        'image_url' => API_BASE_URL . "/images/$fileName",
+        'filename' => $fileName,
+        'size' => filesize($uploadPath)
+    ], 200);
 }
 ?>

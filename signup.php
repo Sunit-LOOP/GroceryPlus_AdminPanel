@@ -12,8 +12,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare('INSERT INTO users (user_name, user_email, user_password) VALUES (?, ?, ?)');
         try {
             $stmt->execute([$name, $email, $hash]);
-            // After successful signup, redirect to admin dashboard
-            header('Location: admin/admin_dashboard.php');
+            // After successful signup, redirect to login page
+            header('Location: login.php');
             exit;
         } catch (Exception $e) {
             $error = 'Registration failed: ' . $e->getMessage();

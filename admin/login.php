@@ -6,10 +6,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
 
-    // Simple check - in real app, check against database with hashed password
-    if ($username === 'admin' && $password === 'admin123') {
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE user_name = ? AND user_type = "admin"');
+    $stmt->execute([$username]);
+    $user = $stmt->fetch();
+
+    if ($user && password_verify($password, $user['user_password'])) {
         $_SESSION['admin_logged_in'] = true;
-        $_SESSION['admin_username'] = $username;
+        $_SESSION['admin_username'] = $user['user_name'];
         header('Location: dashboard.php');
         exit;
     } else {
