@@ -17,7 +17,6 @@
     <div class="card p-5 shadow-lg text-center rounded-4 border-0" style="max-width: 500px; background-color: rgba(255, 255, 255, 0.95);">
         <h1 class="mb-4 text-dark fw-bold">Welcome to GroceryPlus</h1>
         <div class="d-grid gap-3">
-            <a href="login.php" class="btn btn-success btn-lg">User Login</a>
             <a href="admin/login.php" class="btn btn-primary btn-lg">Admin Login</a>
         </div>
     </div>

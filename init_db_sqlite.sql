@@ -119,6 +119,16 @@ CREATE TABLE IF NOT EXISTS reviews (
     FOREIGN KEY (product_id) REFERENCES products(product_id)
 );
 
+CREATE TABLE IF NOT EXISTS likes (
+    like_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL, -- e.g., 'product', 'review', 'message'
+    entity_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, entity_type, entity_id), -- A user can only like an entity once
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
 -- Insert sample data
 INSERT OR IGNORE INTO categories (category_id, category_name, category_description) VALUES
 (1, 'Fruits', 'Fresh fruits'),
